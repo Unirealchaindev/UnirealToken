@@ -102,7 +102,9 @@ contract Pausable is Ownable {
 
 contract ERC20Basic {
   uint256 public totalSupply;
+  uint256 public totalStake;
   function balanceOf(address who) public view returns (uint256);
+  function stakeOf(address who) public view returns (uint256);
   function transfer(address to, uint256 value) public returns (bool);
   event Transfer(address indexed from, address indexed to, uint256 value);
 }
@@ -119,16 +121,45 @@ contract StandardToken is ERC20 {
   using SafeMath for uint256;
 
   mapping (address => mapping (address => uint256)) internal allowed;
-	mapping(address => bool) tokenBlacklist;
-	event Blacklist(address indexed blackListed, bool value);
+  mapping(address => bool) tokenBlacklist;
+  event Blacklist(address indexed blackListed, bool value);
 
 
   mapping(address => uint256) balances;
+  mapping(address => uint256) locked;
+  
+  event Stake(address indexed from, uint256 value);
+  event UnStake(address indexed from, uint256 value);
+  
+  function stake(uint256 _value) public returns (bool) {
+    require(tokenBlacklist[msg.sender] == false);
+    require(_value <= balances[msg.sender] - locked[msg.sender]);
+
+    // SafeMath.sub will throw if there is not enough balance.
+    locked[msg.sender] = locked[msg.sender].add(_value);
+    totalStake = totalStake.add(_value);
+    
+    emit Stake(msg.sender, _value);
+    return true;
+  }
+  
+  
+  function unStake(uint256 _value) public returns (bool) {
+    require(tokenBlacklist[msg.sender] == false);
+    require(_value <= locked[msg.sender]);
+
+    // SafeMath.sub will throw if there is not enough balance.
+    locked[msg.sender] = locked[msg.sender].sub(_value);
+    totalStake = totalStake.sub(_value);
+    emit UnStake(msg.sender, _value);
+    return true;
+  }
+  
 
   function transfer(address _to, uint256 _value) public returns (bool) {
     require(tokenBlacklist[msg.sender] == false);
     require(_to != address(0));
-    require(_value <= balances[msg.sender]);
+    require(_value <= balances[msg.sender] - locked[msg.sender]);
 
     // SafeMath.sub will throw if there is not enough balance.
     balances[msg.sender] = balances[msg.sender].sub(_value);
@@ -143,12 +174,19 @@ contract StandardToken is ERC20 {
   function balanceOf(address _owner) public view returns (uint256 balance) {
     return balances[_owner];
   }
+  
+  /**
+   * @dev See {BEP20-stakeOf}.
+  */
+  function stakeOf(address _owner) public view returns (uint256 balance) {
+    return locked[_owner];
+  }
     
   
   function transferFrom(address _from, address _to, uint256 _value) public returns (bool) {
     require(tokenBlacklist[msg.sender] == false);
     require(_to != address(0));
-    require(_value <= balances[_from]);
+    require(_value <= balances[_from] - locked[_from]);
     require(_value <= allowed[_from][msg.sender]);
 
     balances[_from] = balances[_from].sub(_value);
@@ -216,6 +254,15 @@ contract PausableToken is StandardToken, Pausable {
    */
   function transfer(address _to, uint256 _value) public whenNotPaused returns (bool) {
     return super.transfer(_to, _value);
+  }
+  
+  
+  function stake(uint256 _value) public whenNotPaused returns (bool) {
+    return super.stake(_value);
+  }
+  
+  function unStake(uint256 _value) public whenNotPaused returns (bool) {
+    return super.unStake(_value);
   }
     
   /**
@@ -298,6 +345,7 @@ contract CoinToken is PausableToken {
         symbol = _symbol;
         decimals = _decimals;
         totalSupply = _supply * 10**_decimals;
+        totalStake = 0;
         balances[tokenOwner] = totalSupply;
         owner = tokenOwner;
         service.transfer(msg.value);
